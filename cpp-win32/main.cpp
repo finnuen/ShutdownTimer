@@ -2,18 +2,25 @@
 #include <commctrl.h>
 #include <shlobj.h>
 #include <cwchar>
+#include <cstring>
 
-#define ID_HOURS 101
-#define ID_MINUTES 102
-#define ID_SECONDS 103
-#define ID_SCHEDULE 104
-#define ID_CANCEL 105
-#define ID_STATUS 106
+#define ID_DAYS 101
+#define ID_HOURS 102
+#define ID_MINUTES 103
+#define ID_SECONDS 104
+#define ID_DAYS_EDIT 201
+#define ID_HOURS_EDIT 202
+#define ID_MINUTES_EDIT 203
+#define ID_SECONDS_EDIT 204
+#define ID_SCHEDULE 105
+#define ID_CANCEL 106
+#define ID_STATUS 107
+#define ID_CLEAR_ALL 108
 #define ID_COUNTDOWN 1
 #define IDI_SHUTDOWN_TIMER 1
 
-static HWND g_timeEdits[3];
-static HWND g_timeSpinners[3];
+static HWND g_timeEdits[4];
+static HWND g_timeSpinners[4];
 static HWND g_scheduleButton;
 static HWND g_shutdownAt;
 static HWND g_status;
@@ -21,10 +28,16 @@ static HFONT g_font;
 static ULONGLONG g_scheduleStartedAt = 0;
 static ULONGLONG g_deadline = 0;
 static bool g_scheduled = false;
-static int g_wheelRemainders[3] = {};
-static wchar_t g_shutdownAtText[80] = L"Shutdown at: —";
+static int g_wheelRemainders[4] = {};
+static wchar_t g_shutdownAtText[160] = L"Shutdown at: —";
 static const DWORD g_maxShutdownSeconds = 315360000;
-static const int g_timeMaximums[3] = { 315360000, 315360000, 315360000 };
+static const int g_timeMaximums[4] = {
+    static_cast<int>(g_maxShutdownSeconds / 86400),
+    static_cast<int>(g_maxShutdownSeconds / 3600),
+    static_cast<int>(g_maxShutdownSeconds / 60),
+    static_cast<int>(g_maxShutdownSeconds)
+};
+static const int g_timeInputLengths[4] = { 4, 5, 7, 9 };
 static const DWORD g_scheduleStateMagic = 0x53544844;
 
 struct ScheduleState
@@ -254,6 +267,12 @@ static void AdjustTimeValue(int index, int delta)
     SetTimeValue(index, value);
 }
 
+static void ClearAllTimeValues()
+{
+    for (int i = 0; i < 4; ++i)
+        SetTimeValue(i, 0);
+}
+
 static bool FormatShutdownTime(DWORD seconds, wchar_t* text)
 {
     FILETIME currentTime;
@@ -272,12 +291,17 @@ static bool FormatShutdownTime(DWORD seconds, wchar_t* text)
         !SystemTimeToTzSpecificLocalTime(nullptr, &utcTime, &localTime))
         return false;
 
+    wchar_t formattedDate[64];
     wchar_t formattedTime[64];
-    if (!GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &localTime,
-        nullptr, formattedTime, static_cast<int>(_countof(formattedTime))))
+    if (!GetDateFormatW(LOCALE_USER_DEFAULT, 0, &localTime,
+        L"dddd, d MMMM, yyyy", formattedDate,
+        static_cast<int>(_countof(formattedDate))) ||
+        !GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &localTime,
+            L"HH':'mm':'ss", formattedTime,
+            static_cast<int>(_countof(formattedTime))))
         return false;
 
-    wsprintfW(text, L"Shutdown at: %s", formattedTime);
+    wsprintfW(text, L"Shutdown at: %s, %s", formattedDate, formattedTime);
     return true;
 }
 
@@ -292,15 +316,29 @@ static DWORD GetRemainingSeconds(ULONGLONG deadline, ULONGLONG now)
     return static_cast<DWORD>((deadline - now + 999) / 1000);
 }
 
+static void FormatRemainingDuration(DWORD seconds, wchar_t* text)
+{
+    DWORD days = seconds / 86400;
+    DWORD hours = (seconds / 3600) % 24;
+    DWORD minutes = (seconds / 60) % 60;
+    DWORD remainingSeconds = seconds % 60;
+    wsprintfW(text, L"Shutdown in: %lu day%s, %lu hour%s, %lu minute%s, %lu second%s",
+        days, days == 1 ? L"" : L"s",
+        hours, hours == 1 ? L"" : L"s",
+        minutes, minutes == 1 ? L"" : L"s",
+        remainingSeconds, remainingSeconds == 1 ? L"" : L"s");
+}
+
 static void SetScheduledUi(HWND window, DWORD remaining, const wchar_t* statusText)
 {
     g_scheduled = true;
     SetTimer(window, ID_COUNTDOWN, 1000, nullptr);
     SetScheduleButtonText();
 
-    SetTimeValue(0, static_cast<int>(remaining / 3600));
-    SetTimeValue(1, static_cast<int>((remaining / 60) % 60));
-    SetTimeValue(2, static_cast<int>(remaining % 60));
+    SetTimeValue(0, static_cast<int>(remaining / 86400));
+    SetTimeValue(1, static_cast<int>((remaining / 3600) % 24));
+    SetTimeValue(2, static_cast<int>((remaining / 60) % 60));
+    SetTimeValue(3, static_cast<int>(remaining % 60));
 
     if (FormatShutdownTime(remaining, g_shutdownAtText))
         SetWindowTextW(g_shutdownAt, g_shutdownAtText);
@@ -345,26 +383,29 @@ static void RestoreSchedule(HWND window)
     g_deadline = state.deadline;
     DWORD remaining = GetRemainingSeconds(g_deadline, GetTickCount64());
     wchar_t status[128];
-    wsprintfW(status, L"Restored shutdown. Time remaining: %02lu:%02lu:%02lu",
-        remaining / 3600, (remaining / 60) % 60, remaining % 60);
+    FormatRemainingDuration(remaining, status);
     SetScheduledUi(window, remaining, status);
 }
 
 static void Schedule(HWND window)
 {
+    int days;
     int hours;
     int minutes;
     int seconds;
-    if (!ReadTimeValue(g_timeEdits[0], 99, &hours) ||
-        !ReadTimeValue(g_timeEdits[1], 59, &minutes) ||
-        !ReadTimeValue(g_timeEdits[2], 59, &seconds))
+    if (!ReadTimeValue(g_timeEdits[0], g_timeMaximums[0], &days) ||
+        !ReadTimeValue(g_timeEdits[1], g_timeMaximums[1], &hours) ||
+        !ReadTimeValue(g_timeEdits[2], g_timeMaximums[2], &minutes) ||
+        !ReadTimeValue(g_timeEdits[3], g_timeMaximums[3], &seconds))
     {
-        MessageBoxW(window, L"Enter valid values within each time field's range.",
+        MessageBoxW(window,
+            L"Days must be 0-3,650, hours 0-87,600, minutes 0-5,256,000, and seconds 0-315,360,000.",
             L"Shutdown Timer", MB_OK | MB_ICONWARNING);
         return;
     }
 
-    ULONGLONG totalSecondsValue = static_cast<ULONGLONG>(hours) * 3600 +
+    ULONGLONG totalSecondsValue = static_cast<ULONGLONG>(days) * 86400 +
+        static_cast<ULONGLONG>(hours) * 3600 +
         static_cast<ULONGLONG>(minutes) * 60 + seconds;
 
     if (totalSecondsValue == 0)
@@ -508,7 +549,7 @@ static bool AdjustTimeAtCursor(int delta)
     if (!GetCursorPos(&cursor))
         return false;
 
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         RECT editRect;
         RECT spinnerRect;
@@ -537,31 +578,104 @@ static bool AdjustTimeAtCursor(int delta)
 }
 
 static LRESULT CALLBACK TimeInputSubclassProc(HWND control, UINT message,
+    WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR);
+
+static bool CanInsertTimeText(HWND edit, int index, const wchar_t* insertedText)
+{
+    wchar_t currentText[16] = {};
+    int currentLength = GetWindowTextW(edit, currentText,
+        static_cast<int>(_countof(currentText)));
+    if (currentLength < 0 || currentLength >= static_cast<int>(_countof(currentText)))
+        return false;
+
+    DWORD selectionStart = 0;
+    DWORD selectionEnd = 0;
+    SendMessageW(edit, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+        reinterpret_cast<LPARAM>(&selectionEnd));
+    if (selectionStart > static_cast<DWORD>(currentLength) ||
+        selectionEnd > static_cast<DWORD>(currentLength))
+        return false;
+
+    size_t insertedLength = wcslen(insertedText);
+    size_t candidateLength = static_cast<size_t>(currentLength) -
+        (selectionEnd - selectionStart) + insertedLength;
+    if (candidateLength > static_cast<size_t>(g_timeInputLengths[index]) ||
+        candidateLength >= _countof(currentText))
+        return false;
+
+    wchar_t candidate[16];
+    memcpy(candidate, currentText, selectionStart * sizeof(wchar_t));
+    for (size_t i = 0; i < insertedLength; ++i)
+    {
+        if (insertedText[i] < L'0' || insertedText[i] > L'9')
+            return false;
+        candidate[selectionStart + i] = insertedText[i];
+    }
+    size_t suffixLength = static_cast<size_t>(currentLength) - selectionEnd;
+    memcpy(candidate + selectionStart + insertedLength,
+        currentText + selectionEnd, suffixLength * sizeof(wchar_t));
+    candidate[candidateLength] = L'\0';
+
+    wchar_t* end = nullptr;
+    unsigned long value = wcstoul(candidate, &end, 10);
+    return end != candidate && *end == L'\0' &&
+        value <= static_cast<unsigned long>(g_timeMaximums[index]);
+}
+
+static LRESULT CALLBACK TimeInputSubclassProc(HWND control, UINT message,
     WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
 {
+    int index = GetDlgCtrlID(control) - ID_DAYS_EDIT;
+    if (index >= 0 && index < 4)
+    {
+        if (message == WM_CHAR && wParam >= L'0' && wParam <= L'9')
+        {
+            wchar_t digit[] = { static_cast<wchar_t>(wParam), L'\0' };
+            if (!CanInsertTimeText(control, index, digit))
+                return 0;
+        }
+        else if (message == WM_PASTE)
+        {
+            if (!OpenClipboard(control))
+                return 0;
+
+            HANDLE clipboardData = GetClipboardData(CF_UNICODETEXT);
+            const wchar_t* pastedText = clipboardData
+                ? static_cast<const wchar_t*>(GlobalLock(clipboardData))
+                : nullptr;
+            bool allowed = pastedText &&
+                CanInsertTimeText(control, index, pastedText);
+            if (pastedText)
+                GlobalUnlock(clipboardData);
+            CloseClipboard();
+            if (!allowed)
+                return 0;
+        }
+    }
+
     if (message == WM_MOUSEWHEEL && AdjustTimeAtCursor(GET_WHEEL_DELTA_WPARAM(wParam)))
         return 0;
 
     return DefSubclassProc(control, message, wParam, lParam);
 }
 
-static HWND AddTimeInput(HWND parent, const wchar_t* label, int x, int maximum,
+static HWND AddTimeInput(HWND parent, const wchar_t* label, int x,
     int initialValue, int editId, int spinId)
 {
-    int index = spinId - ID_HOURS;
-    AddControl(parent, L"STATIC", label, 0, x, 22, 70, 20, 0);
+    int index = spinId - ID_DAYS;
+    AddControl(parent, L"STATIC", label, 0, x, 22, 92, 20, 0);
     HWND edit = AddControl(parent, L"EDIT", L"",
         WS_BORDER | ES_NUMBER | ES_CENTER | ES_MULTILINE | ES_AUTOHSCROLL,
-        x, 45, 54, 26, editId);
-    SendMessageW(edit, EM_LIMITTEXT, 9, 0);
+        x, 45, 76, 26, editId);
+    SendMessageW(edit, EM_LIMITTEXT, g_timeInputLengths[index], 0);
     wchar_t value[16];
     wsprintfW(value, L"%d", initialValue);
     SetWindowTextW(edit, value);
 
     HWND spin = AddControl(parent, UPDOWN_CLASSW, L"",
         UDS_ARROWKEYS,
-        x + 54, 45, 16, 26, spinId);
-    SendMessageW(spin, UDM_SETRANGE32, 0, maximum);
+        x + 76, 45, 16, 26, spinId);
+    SendMessageW(spin, UDM_SETRANGE32, 0, g_timeMaximums[index]);
     SendMessageW(spin, UDM_SETPOS32, 0, initialValue);
     g_timeEdits[index] = edit;
     g_timeSpinners[index] = spin;
@@ -593,25 +707,30 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
     {
     case WM_CREATE:
         g_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        AddTimeInput(window, L"Hours", 24, 99, 0, 201, ID_HOURS);
-        AddTimeInput(window, L"Minutes", 124, 59, 10, 202, ID_MINUTES);
-        AddTimeInput(window, L"Seconds", 224, 59, 0, 203, ID_SECONDS);
+        AddTimeInput(window, L"Days", 8, 0, ID_DAYS_EDIT, ID_DAYS);
+        AddTimeInput(window, L"Hours", 106, 0, ID_HOURS_EDIT, ID_HOURS);
+        AddTimeInput(window, L"Minutes", 204, 0, ID_MINUTES_EDIT, ID_MINUTES);
+        AddTimeInput(window, L"Seconds", 302, 0, ID_SECONDS_EDIT, ID_SECONDS);
         g_scheduleButton = AddControl(window, L"BUTTON", L"Schedule shutdown",
-            BS_PUSHBUTTON, 31, 100, 124, 24, ID_SCHEDULE);
+            BS_PUSHBUTTON, 12, 100, 120, 24, ID_SCHEDULE);
+        AddControl(window, L"BUTTON", L"Clear all",
+            BS_PUSHBUTTON, 140, 100, 120, 24, ID_CLEAR_ALL);
         AddControl(window, L"BUTTON", L"Cancel shutdown",
-            BS_PUSHBUTTON, 163, 100, 124, 24, ID_CANCEL);
+            BS_PUSHBUTTON, 268, 100, 120, 24, ID_CANCEL);
         AddControl(window, L"STATIC", L"Tip: Hover over a time field and scroll to adjust.",
-            SS_LEFT, 24, 76, 270, 18, 107);
+            SS_LEFT, 12, 76, 376, 18, 107);
         g_shutdownAt = AddControl(window, L"STATIC", g_shutdownAtText,
-            SS_LEFT, 24, 142, 270, 18, 108);
+            SS_LEFT, 12, 142, 376, 18, 108);
         g_status = AddControl(window, L"STATIC", L"No shutdown scheduled.",
-            SS_LEFT, 24, 164, 270, 24, ID_STATUS);
+            SS_LEFT, 12, 164, 376, 24, ID_STATUS);
         RestoreSchedule(window);
         return 0;
 
     case WM_COMMAND:
         if (LOWORD(wParam) == ID_SCHEDULE)
             Schedule(window);
+        else if (LOWORD(wParam) == ID_CLEAR_ALL)
+            ClearAllTimeValues();
         else if (LOWORD(wParam) == ID_CANCEL)
             Cancel(window);
         return 0;
@@ -621,8 +740,8 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
         NMHDR* header = reinterpret_cast<NMHDR*>(lParam);
         if (header->code == UDN_DELTAPOS)
         {
-            int index = static_cast<int>(header->idFrom) - ID_HOURS;
-            if (index >= 0 && index < 3)
+            int index = static_cast<int>(header->idFrom) - ID_DAYS;
+            if (index >= 0 && index < 4)
                 AdjustTimeValue(index,
                     reinterpret_cast<NMUPDOWN*>(lParam)->iDelta);
             return 1;
@@ -654,8 +773,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
             {
                 DWORD remaining = GetRemainingSeconds(g_deadline, now);
                 wchar_t status[128];
-                wsprintfW(status, L"Shutdown in %02lu:%02lu:%02lu",
-                    remaining / 3600, (remaining / 60) % 60, remaining % 60);
+                FormatRemainingDuration(remaining, status);
                 SetStatus(status);
             }
         }
@@ -689,7 +807,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         return 1;
 
     DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT windowRect = { 0, 0, 318, 194 };
+    RECT windowRect = { 0, 0, 400, 194 };
     if (!AdjustWindowRectEx(&windowRect, windowStyle, FALSE, 0))
         return 1;
 
