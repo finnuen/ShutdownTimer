@@ -1,3 +1,5 @@
+# Shutdown Timer v3.2
+
 - 100% C++, standalone, no dependencies
 - persist previous session
 - reschedule shutdown (overwrite an ongoing timer)
