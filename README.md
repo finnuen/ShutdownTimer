@@ -1,14 +1,7 @@
-<img width="365" height="224" alt="image" src="https://github.com/user-attachments/assets/aacca568-d586-4d3b-93d5-7b545732af7e" />
+- 100% C++, standalone, no dependencies
+- persist previous session
+- reschedule shutdown (overwritre on-going timer)
+- Scroll to adjust
+- estimated time to shutdown
 
-## Shutdown Timer
-
-Run `ShutdownTimer.exe` on Windows to schedule or cancel a shutdown. The native Win32
-application is a standalone executable and does not require the .NET runtime.
-It includes a clock-and-power icon in the window and executable.
-The app shows the estimated local shutdown time and lets you replace an active timer
-using the **Reschedule shutdown** button.
-Active schedules are remembered in `%APPDATA%\Shutdown Timer` so reopening the app
-restores the countdown and reschedule action. Windows shutdown timers do not survive
-a Windows restart.
-
-The C++ source is in `cpp-win32/main.cpp`.
+<img width="320" height="221" alt="2026-10-14_03-46-21" src="https://github.com/user-attachments/assets/f40f315b-2204-4429-99fc-dee27a4d4796" />
