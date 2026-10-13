@@ -23,7 +23,8 @@ static ULONGLONG g_deadline = 0;
 static bool g_scheduled = false;
 static int g_wheelRemainders[3] = {};
 static wchar_t g_shutdownAtText[80] = L"Shutdown at: —";
-static const int g_timeMaximums[3] = { 99, 59, 59 };
+static const DWORD g_maxShutdownSeconds = 315360000;
+static const int g_timeMaximums[3] = { 315360000, 315360000, 315360000 };
 static const DWORD g_scheduleStateMagic = 0x53544844;
 
 struct ScheduleState
@@ -167,7 +168,8 @@ static ScheduleStateResult LoadScheduleState(ULONGLONG now, ScheduleState* state
         loaded.version != 2 || bootTimeDifference > 120ULL * 10000000 ||
         loaded.startedAt > now ||
         loaded.deadline <= now || loaded.deadline <= loaded.startedAt ||
-        loaded.deadline - loaded.startedAt > 359999ULL * 1000)
+        loaded.deadline - loaded.startedAt >
+            static_cast<ULONGLONG>(g_maxShutdownSeconds) * 1000)
         return ScheduleStateResult::Invalid;
 
     *state = loaded;
@@ -362,14 +364,25 @@ static void Schedule(HWND window)
         return;
     }
 
-    DWORD totalSeconds = static_cast<DWORD>(hours * 3600 + minutes * 60 + seconds);
+    ULONGLONG totalSecondsValue = static_cast<ULONGLONG>(hours) * 3600 +
+        static_cast<ULONGLONG>(minutes) * 60 + seconds;
 
-    if (totalSeconds == 0)
+    if (totalSecondsValue == 0)
     {
         MessageBoxW(window, L"Choose a time greater than zero.", L"Shutdown Timer",
             MB_OK | MB_ICONWARNING);
         return;
     }
+
+    if (totalSecondsValue > g_maxShutdownSeconds)
+    {
+        MessageBoxW(window,
+            L"The total shutdown delay cannot exceed 315,360,000 seconds (10 years).",
+            L"Shutdown Timer", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    DWORD totalSeconds = static_cast<DWORD>(totalSecondsValue);
 
     DWORD previousRemaining = 0;
     if (g_scheduled)
@@ -540,7 +553,7 @@ static HWND AddTimeInput(HWND parent, const wchar_t* label, int x, int maximum,
     HWND edit = AddControl(parent, L"EDIT", L"",
         WS_BORDER | ES_NUMBER | ES_CENTER | ES_MULTILINE | ES_AUTOHSCROLL,
         x, 45, 54, 26, editId);
-    SendMessageW(edit, EM_LIMITTEXT, 2, 0);
+    SendMessageW(edit, EM_LIMITTEXT, 9, 0);
     wchar_t value[16];
     wsprintfW(value, L"%d", initialValue);
     SetWindowTextW(edit, value);
