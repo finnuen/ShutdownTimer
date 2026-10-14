@@ -6,4 +6,5 @@
 - Scroll to adjust
 - estimated shutdown date and time, plus a labeled countdown
 
-<img width="402" height="221" alt="2026-10-14_05-49-32" src="https://github.com/user-attachments/assets/c1a400f3-5bc6-443f-9a8c-c19d965f3155" />
+<img width="402" height="221" alt="2026-10-14_12-59-59" src="https://github.com/user-attachments/assets/a9cc69c4-7f7b-4b45-96c0-302a7e30f272" />
+
