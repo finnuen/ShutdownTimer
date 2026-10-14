@@ -1,4 +1,4 @@
-# Shutdown Timer v3.3
+# Shutdown Timer v3.4
 
 - 100% C++, standalone, no dependencies
 - persist previous session

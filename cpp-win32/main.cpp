@@ -819,7 +819,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     int windowHeight = windowRect.bottom - windowRect.top;
     int windowX = workArea.left + (workArea.right - workArea.left - windowWidth) / 2;
     int windowY = workArea.top + (workArea.bottom - workArea.top - windowHeight) / 2;
-    HWND window = CreateWindowExW(0, className, L"Shutdown Timer v3.3",
+    HWND window = CreateWindowExW(0, className, L"Shutdown Timer v3.4",
         windowStyle, windowX, windowY, windowWidth, windowHeight,
         nullptr, nullptr, instance, nullptr);
     if (!window)

@@ -1,0 +1,2 @@
+- Never add Copilot as a co-author or contributor to commits.
+- Do not modify Git commit metadata; use the human author's credentials exclusively.
